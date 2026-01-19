@@ -1,0 +1,36 @@
+############################
+# FPS / LIMIT
+############################
+fps_limit=85
+
+############################
+# OVERLAY APPEARANCE
+############################
+position=top-left
+font_size=24
+round_corners=10
+background_alpha=0.4
+padding=8
+
+############################
+# WHAT TO DISPLAY
+############################
+fps
+frametime
+cpu_stats
+gpu_stats
+ram
+vram
+engine_version
+vulkan_driver
+resolution
+
+############################
+# COLORS
+############################
+text_color=FFFFFF
+fps_color=00FFAA
+cpu_color=FFAA00
+gpu_color=00AAFF
+frametime_color=FF5555
+background_color=1A1A1A

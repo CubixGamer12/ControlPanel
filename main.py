@@ -13,7 +13,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk
 
-# --- DATA MODEL FOR PROCESSES (WITH SORTING PROPERTIES) ---
+# --- DATA MODEL FOR PROCESSES ---
 class ProcessItem(GObject.Object):
     pid = GObject.Property(type=int)
     name = GObject.Property(type=str)
@@ -54,10 +54,10 @@ class LinuxUtilityApp(Adw.Application):
         # TAB 1: TOOLS
         self.view_stack.add_titled_with_icon(self.create_tools_page(), "tools", "Tools", "emblem-system-symbolic")
 
-        # TAB 2: DIAGNOSTICS (ALL ORIGINAL INFO RESTORED)
+        # TAB 2: DIAGNOSTICS
         self.view_stack.add_titled_with_icon(self.create_info_page(), "info", "Diagnostics", "dialog-information-symbolic")
 
-        # TAB 3: PROCESSES (SORTABLE)
+        # TAB 3: PROCESSES 
         self.view_stack.add_titled_with_icon(self.create_task_manager_page(), "tasks", "Processes", "utilities-system-monitor-symbolic")
 
         view_switcher = Adw.ViewSwitcher(stack=self.view_stack)
@@ -119,7 +119,7 @@ class LinuxUtilityApp(Adw.Application):
         list_box.append(update_row); list_box.append(mango_row); list_box.append(pivot_row)
         return self.wrap_in_resizable_view(list_box)
 
-    # --- DIAGNOSTICS PAGE (FULL 19+ INFO POINTS RESTORED) ---
+    # --- DIAGNOSTICS PAGE ---
     def create_info_page(self):
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
 
@@ -171,7 +171,7 @@ class LinuxUtilityApp(Adw.Application):
 
         return self.wrap_in_resizable_view(vbox)
 
-    # --- TASK MANAGER PAGE (SORTABLE) ---
+    # --- TASK MANAGER PAGE ---
     def create_task_manager_page(self):
         main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         clamp = Adw.Clamp(maximum_size=600)

@@ -10,6 +10,7 @@ import socket
 import time
 import threading
 import urllib.request
+import shutil
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -361,13 +362,37 @@ class LinuxUtilityApp(Adw.Application):
     def on_config_toggle(self, widget, state, filename, target_path):
         ext = ("pivot" if state else "original") if filename == "general.conf" else ("enabled" if state else "disabled")
         source = self.get_resource_path(os.path.join("configs", f"{filename}.{ext}"))
+        
         target = os.path.expanduser(target_path)
+        backup_dir = os.path.join(os.path.dirname(target), "backup")
+        
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            if os.path.exists(target) or os.path.islink(target): os.remove(target)
-            os.symlink(source, target)
-        except: pass
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            if os.path.exists(target):
+                backup_file = os.path.join(backup_dir, os.path.basename(target))
+                
+                backup_file = backup_file.replace(".pivot", "").replace(".enabled", "")
+                
+                if os.path.exists(backup_file):
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                    backup_file = f"{backup_file}.{timestamp}"
+                
+                shutil.move(target, backup_file)
+                print(f"[INFO] Moved old config to backup: {backup_file}")
+            
+            shutil.copy2(source, target)
+            print(f"[INFO] Copied {source} -> {target}")
+            
+            subprocess.run(["hyprctl", "reload"], check=False)
+            print("[INFO] Hyprland reloaded")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to toggle config: {e}")
+        
         return False
+
 
     def on_system_update(self, btn):
         package_managers = {

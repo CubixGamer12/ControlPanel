@@ -484,6 +484,7 @@ class LinuxUtilityApp(Adw.Application):
             "io.github.ilya_zlobintsev.LACT",
             "net.nokyan.Resources",
             "org.equicord.equibop",
+            "it.mijorus.gearlever",
         ]
 
     def install_flatpaks(self):

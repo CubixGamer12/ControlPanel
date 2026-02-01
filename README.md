@@ -37,8 +37,7 @@ cd ControlPanel
 Run the installer:
 
 ```bash
-chmod +x install.py
-./install.py
+python install.py
 ```
 
 The installer will:

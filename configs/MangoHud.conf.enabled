@@ -1,36 +1,60 @@
-############################
-# FPS / LIMIT
-############################
+########################################
+# PERFORMANCE
+########################################
 fps_limit=85
+vsync=0
 
-############################
-# OVERLAY APPEARANCE
-############################
+########################################
+# LAYOUT & APPEARANCE
+########################################
 position=top-left
-font_size=24
-round_corners=10
-background_alpha=0.4
-padding=8
+font_size=23
+padding=10
+round_corners=12
+background_alpha=0.35
+text_outline=1
+text_outline_color=000000
 
-############################
-# WHAT TO DISPLAY
-############################
+########################################
+# METRICS
+########################################
 fps
 frametime
 cpu_stats
+cpu_mhz
+cpu_temp
+cpu_power
+gpu_name
 gpu_stats
+gpu_core_clock
+gpu_mem_clock
+gpu_power
+gpu_fan
 ram
 vram
+swap
 engine_version
 vulkan_driver
-resolution
+wine
+gamemode
 
-############################
+########################################
 # COLORS
-############################
-text_color=FFFFFF
-fps_color=00FFAA
-cpu_color=FFAA00
-gpu_color=00AAFF
-frametime_color=FF5555
-background_color=1A1A1A
+########################################
+background_color=121212
+
+text_color=E6E6E6
+fps_color=3DFFB5
+frametime_color=FF5F5F
+
+cpu_color=FFB454
+gpu_color=4DB5FF
+
+ram_color=FFD580
+vram_color=80C0FF  
+swap_color=9A9A9A
+
+fps_color_change
+fps_color_change_low=FF5555
+fps_color_change_medium=FFD75F
+fps_color_change_high=3DFFB5

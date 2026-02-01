@@ -8,34 +8,25 @@ import re
 import datetime
 import socket 
 import time
+import threading
+import urllib.request
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk
 
-# --- DATA MODEL FOR PROCESSES ---
-class ProcessItem(GObject.Object):
-    pid = GObject.Property(type=int)
-    name = GObject.Property(type=str)
-    cpu_val = GObject.Property(type=float)
-    mem_val = GObject.Property(type=float)
-
-    def __init__(self, pid, name, cpu, mem):
-        super().__init__()
-        self.pid = pid
-        self.name = name
-        self.cpu_val = cpu
-        self.mem_val = mem
-        self.cpu_text = f"{cpu:.1f}%"
-        self.mem_text = f"{mem:.1f}%"
-
 class LinuxUtilityApp(Adw.Application):
+    
     def __init__(self):
         super().__init__(application_id='com.example.LinuxUtility',
                          flags=Gio.ApplicationFlags.FLAGS_NONE)
         self.cpu_history = [0] * 50
         self.mem_history = [0] * 50
-        self.selected_pid = None
+
+    def get_resource_path(self, relative_path):
+        import sys
+        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(base_path, relative_path)
 
     def do_activate(self):
         win = Adw.ApplicationWindow(application=self)
@@ -57,9 +48,6 @@ class LinuxUtilityApp(Adw.Application):
         # TAB 2: DIAGNOSTICS
         self.view_stack.add_titled_with_icon(self.create_info_page(), "info", "Diagnostics", "dialog-information-symbolic")
 
-        # TAB 3: PROCESSES 
-        self.view_stack.add_titled_with_icon(self.create_task_manager_page(), "tasks", "Processes", "utilities-system-monitor-symbolic")
-
         view_switcher = Adw.ViewSwitcher(stack=self.view_stack)
         header.set_title_widget(view_switcher)
         content.append(self.view_stack)
@@ -69,6 +57,8 @@ class LinuxUtilityApp(Adw.Application):
         content.append(view_switcher_bar)
         
         win.present()
+        
+        GLib.timeout_add(2000, self.refresh_data)
 
     # --- GRAPH LOGIC ---
     def create_graph(self, label_text, color):
@@ -101,22 +91,64 @@ class LinuxUtilityApp(Adw.Application):
         list_box = Gtk.ListBox(css_classes=["boxed-list"])
         list_box.set_selection_mode(Gtk.SelectionMode.NONE)
 
+        # Update Row
         update_row = Adw.ActionRow(title="System Update", subtitle=f"Detected: {distro.name(pretty=True)}")
         update_btn = Gtk.Button(icon_name="software-update-available-symbolic", valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
         update_btn.connect("clicked", self.on_system_update)
         update_row.add_suffix(update_btn)
+        list_box.append(update_row)
+
+        # Install Packages Row
+        install_row = Adw.ActionRow(
+            title="Install Packages",
+            subtitle="Install predefined packages via system package manager"
+        )
+        install_btn = Gtk.Button(
+            icon_name="system-software-install-symbolic",
+            valign=Gtk.Align.CENTER
+        )
+        install_btn.connect("clicked", self.on_install_packages)
+        install_row.add_suffix(install_btn)
+        list_box.append(install_row)
+
+        # Flatpak Install row
+        flatpak_row = Adw.ActionRow(
+            title="Install Flatpaks",
+            subtitle="Install predefined Flatpak applications"
+        )
+        flatpak_btn = Gtk.Button(
+            icon_name="flatpak-symbolic",
+            valign=Gtk.Align.CENTER)
+        flatpak_btn.connect(
+            "clicked",
+            lambda x: self.open_terminal(self.install_flatpaks())
+        )
+        flatpak_row.add_suffix(flatpak_btn)
+        list_box.append(flatpak_row)
+
+        # Ping Row
+        ping_row = Adw.ActionRow(title="Network Latency Test", subtitle="Ping Google DNS (8.8.8.8)")
+        ping_btn = Gtk.Button(label="Run Ping", valign=Gtk.Align.CENTER)
+        ping_btn.connect("clicked", lambda x: self.run_ping_test())
+        ping_row.add_suffix(ping_btn)
+        list_box.append(ping_row)
         
-        mango_row = Adw.ActionRow(title="MangoHud Toggle", subtitle="Swap local config to ~/.config/MangoHud/")
-        mango_sw = Gtk.Switch(active=self.get_config_status("MangoHud.conf"), valign=Gtk.Align.CENTER)
-        mango_sw.connect("state-set", self.on_config_toggle, "MangoHud.conf", "~/.config/MangoHud/MangoHud.conf")
-        mango_row.add_suffix(mango_sw)
+        # MangoHud Row
+        if os.path.exists(os.path.expanduser("~/.config/MangoHud")):
+            mango_row = Adw.ActionRow(title="MangoHud Toggle", subtitle="Swap local config to ~/.config/MangoHud/")
+            mango_sw = Gtk.Switch(active=self.get_config_status("MangoHud.conf"), valign=Gtk.Align.CENTER)
+            mango_sw.connect("state-set", self.on_config_toggle, "MangoHud.conf", "~/.config/MangoHud/MangoHud.conf")
+            mango_row.add_suffix(mango_sw)
+            list_box.append(mango_row)
 
-        pivot_row = Adw.ActionRow(title="Monitor Pivot (DP-2)", subtitle="Swap Hyprland layout config")
-        pivot_sw = Gtk.Switch(active=self.get_config_status("general.conf"), valign=Gtk.Align.CENTER)
-        pivot_sw.connect("state-set", self.on_config_toggle, "general.conf", "~/.config/hypr/hyprland/general.conf")
-        pivot_row.add_suffix(pivot_sw)
+        # Pivor Row
+        if os.path.exists(os.path.expanduser("~/.config/hypr")):
+            pivot_row = Adw.ActionRow(title="Monitor Pivot (DP-2)", subtitle="Swap Hyprland layout config")
+            pivot_sw = Gtk.Switch(active=self.get_config_status("general.conf"), valign=Gtk.Align.CENTER)
+            pivot_sw.connect("state-set", self.on_config_toggle, "general.conf", "~/.config/hypr/hyprland/general.conf")
+            pivot_row.add_suffix(pivot_sw)
+            list_box.append(pivot_row)
 
-        list_box.append(update_row); list_box.append(mango_row); list_box.append(pivot_row)
         return self.wrap_in_resizable_view(list_box)
 
     # --- DIAGNOSTICS PAGE ---
@@ -145,15 +177,18 @@ class LinuxUtilityApp(Adw.Application):
             ("CPU Temp", self.get_temp(), "sensors-temperature-symbolic")
         ]))
 
-        # 3. Memory & Storage
-        mem = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        vbox.append(self.create_spec_group("Memory &amp; Storage", [
-            ("Total RAM", f"{round(mem.total / 1e9, 2)} GB", "ram-symbolic"),
-            ("Available", f"{round(mem.available / 1e9, 2)} GB", "ram-symbolic"),
-            ("Root Disk", f"{disk.percent}% Used", "drive-harddisk-symbolic"),
-            ("Disk Free", f"{round(disk.free / 1e9, 1)} GB", "drive-harddisk-symbolic")
-        ]))
+        # 3. Memory & Storage Analysis
+        storage_items = [
+            ("Total RAM", f"{round(psutil.virtual_memory().total / 1e9, 2)} GB", "ram-symbolic"),
+            ("Available", f"{round(psutil.virtual_memory().available / 1e9, 2)} GB", "ram-symbolic")
+        ]
+        for part in psutil.disk_partitions():
+            if part.fstype in ['ext4', 'btrfs', 'xfs', 'ntfs', 'vfat']:
+                try:
+                    usage = psutil.disk_usage(part.mountpoint)
+                    storage_items.append((f"Disk ({part.mountpoint})", f"{usage.percent}% Used of {round(usage.total/1e9, 1)} GB", "drive-harddisk-symbolic"))
+                except: continue
+        vbox.append(self.create_spec_group("Memory &amp; Storage Analysis", storage_items))
 
         # 4. Graphics & Display
         vbox.append(self.create_spec_group("Graphics &amp; Display", [
@@ -163,51 +198,56 @@ class LinuxUtilityApp(Adw.Application):
         ]))
 
         # 5. Connectivity & Health
-        vbox.append(self.create_spec_group("Connectivity &amp; Health", [
+        conn_items = [
             ("Local IP", self.get_ip(), "network-transmit-receive-symbolic"),
             ("Battery", self.get_battery(), "battery-full-symbolic"),
             ("Fan Speed", self.get_fans(), "sensors-fan-symbolic")
-        ]))
+        ]
+        
+        conn_group = self.create_spec_group("Connectivity &amp; Health", conn_items)
+        
+        self.pub_ip_row = Adw.ActionRow(title="Public IP", subtitle="Click to check")
+        self.pub_ip_row.add_prefix(Gtk.Image.new_from_icon_name("network-wired-symbolic"))
+        pub_ip_btn = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER)
+        pub_ip_btn.connect("clicked", self.update_public_ip)
+        self.pub_ip_row.add_suffix(pub_ip_btn)
+        
+        list_box = conn_group.get_last_child() 
+        if isinstance(list_box, Gtk.ListBox):
+            list_box.insert(self.pub_ip_row, 1)
+        
+        vbox.append(conn_group)
 
         return self.wrap_in_resizable_view(vbox)
 
-    # --- TASK MANAGER PAGE ---
-    def create_task_manager_page(self):
-        main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        clamp = Adw.Clamp(maximum_size=600)
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        vbox.set_margin_top(10); vbox.set_margin_bottom(10)
+    # --- LOGIC FUNCTIONS ---
 
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.proc_search = Gtk.SearchEntry(hexpand=True, placeholder_text="Filter processes...")
-        kill_btn = Gtk.Button(label="Kill Process", css_classes=["destructive-action"])
-        kill_btn.connect("clicked", self.on_kill_clicked)
-        toolbar.append(self.proc_search); toolbar.append(kill_btn); vbox.append(toolbar)
+    def update_public_ip(self, btn):
+        self.pub_ip_row.set_subtitle("Fetching...")
+        def fetch():
+            try:
+                with urllib.request.urlopen('https://api.ipify.org', timeout=5) as response:
+                    ip = response.read().decode('utf-8')
+                    GLib.idle_add(self.pub_ip_row.set_subtitle, ip)
+            except:
+                GLib.idle_add(self.pub_ip_row.set_subtitle, "Error/Timeout")
+        threading.Thread(target=fetch, daemon=True).start()
 
-        self.proc_store = Gio.ListStore(item_type=ProcessItem)
-        self.sort_model = Gtk.SortListModel(model=self.proc_store)
-        self.selection = Gtk.SingleSelection(model=self.sort_model)
-        self.selection.connect("selection-changed", self.on_selection_changed)
+    def run_ping_test(self):
+        full_bash_cmd = "echo 'Testing connection to Google DNS...'; ping -c 4 8.8.8.8; echo -e '\nDone!'; sleep 3"
+        self.open_terminal(full_bash_cmd)
 
-        column_view = Gtk.ColumnView(model=self.selection, vexpand=True)
-        self.sort_model.set_sorter(column_view.get_sorter())
+    def open_terminal(self, cmd):
+        terminal = "xterm"
+        for t in ["gnome-terminal", "konsole", "xfce4-terminal", "alacritty", "kitty", "foot"]:
+            if subprocess.run(f"command -v {t}", shell=True, capture_output=True).returncode == 0:
+                terminal = t
+                break
+        if terminal == "gnome-terminal":
+            subprocess.Popen(["gnome-terminal", "--", "bash", "-c", cmd])
+        else:
+            subprocess.Popen([terminal, "-e", f"bash -c \"{cmd}\""])
 
-        column_view.append_column(self.create_task_column("PID", "pid", 80, Gtk.NumericSorter.new(Gtk.PropertyExpression.new(ProcessItem, None, "pid"))))
-        column_view.append_column(self.create_task_column("Name", "name", 220, Gtk.StringSorter.new(Gtk.PropertyExpression.new(ProcessItem, None, "name"))))
-        column_view.append_column(self.create_task_column("CPU", "cpu_text", 85, Gtk.NumericSorter.new(Gtk.PropertyExpression.new(ProcessItem, None, "cpu_val"))))
-        column_view.append_column(self.create_task_column("Mem", "mem_text", 85, Gtk.NumericSorter.new(Gtk.PropertyExpression.new(ProcessItem, None, "mem_val"))))
-
-        scrolled = Gtk.ScrolledWindow(child=column_view, vexpand=True)
-        scrolled.set_propagate_natural_height(True)
-        scrolled.set_min_content_height(400)
-        
-        vbox.append(scrolled)
-        clamp.set_child(vbox); main_vbox.append(clamp)
-        
-        GLib.timeout_add(2000, self.refresh_data)
-        return main_vbox
-
-    # --- CORE HELPERS & DATA REFRESH ---
     def refresh_data(self):
         cpu_val = psutil.cpu_percent()
         mem_val = psutil.virtual_memory().percent
@@ -219,20 +259,6 @@ class LinuxUtilityApp(Adw.Application):
         if hasattr(self, 'cpu_draw_area'): self.cpu_draw_area.queue_draw()
         if hasattr(self, 'mem_draw_area'): self.mem_draw_area.queue_draw()
 
-        procs = []
-        search = self.proc_search.get_text().lower()
-        for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
-            try:
-                if search in p.info['name'].lower() or search in str(p.info['pid']):
-                    procs.append(ProcessItem(p.info['pid'], p.info['name'], p.info['cpu_percent'], p.info['memory_percent']))
-            except: continue
-        
-        self.proc_store.splice(0, self.proc_store.get_n_items(), procs)
-
-        if self.selected_pid:
-            for i in range(self.sort_model.get_n_items()):
-                if self.sort_model.get_item(i).pid == self.selected_pid:
-                    self.selection.set_selected(i); break
         return True
 
     # --- PROBES ---
@@ -301,15 +327,6 @@ class LinuxUtilityApp(Adw.Application):
         return str(datetime.timedelta(seconds=int(time.time() - psutil.boot_time())))
 
     # --- UI HELPERS ---
-    def create_task_column(self, title, prop, width, sorter):
-        factory = Gtk.SignalListItemFactory()
-        factory.connect("setup", lambda f, item: item.set_child(Gtk.Label(halign=Gtk.Align.START, margin_start=10)))
-        factory.connect("bind", lambda f, item: item.get_child().set_label(str(getattr(item.get_item(), prop))))
-        col = Gtk.ColumnViewColumn(title=title, factory=factory)
-        col.set_fixed_width(width)
-        col.set_sorter(sorter)
-        return col
-
     def create_spec_group(self, title, items):
         group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         label = Gtk.Label(label=f"<b>{title}</b>", use_markup=True, halign=Gtk.Align.START)
@@ -335,11 +352,15 @@ class LinuxUtilityApp(Adw.Application):
     def get_config_status(self, filename):
         targets = {"general.conf": "~/.config/hypr/hyprland/general.conf", "MangoHud.conf": "~/.config/MangoHud/MangoHud.conf"}
         path = os.path.expanduser(targets.get(filename))
-        return os.path.islink(path) and (".pivot" in os.readlink(path) or ".enabled" in os.readlink(path))
+        if not os.path.islink(path): return False
+        try:
+            link_target = os.readlink(path)
+            return ".pivot" in link_target or ".enabled" in link_target
+        except: return False
 
     def on_config_toggle(self, widget, state, filename, target_path):
         ext = ("pivot" if state else "original") if filename == "general.conf" else ("enabled" if state else "disabled")
-        source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs", f"{filename}.{ext}")
+        source = self.get_resource_path(os.path.join("configs", f"{filename}.{ext}"))
         target = os.path.expanduser(target_path)
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -349,17 +370,181 @@ class LinuxUtilityApp(Adw.Application):
         return False
 
     def on_system_update(self, btn):
-        subprocess.Popen(["gnome-terminal", "--", "bash", "-c", "sudo pacman -Syu; read"])
+        package_managers = {
+            "pacman": "sudo pacman -Syu",
+            "apt": "sudo apt update && sudo apt upgrade -y",
+            "dnf": "sudo dnf upgrade -y",
+            "zypper": "sudo zypper dup",
+            "eopkg": "sudo eopkg up",
+            "xbps-install": "sudo xbps-install -Syu",
+            "emerge": "sudo emerge --sync && sudo emerge -uDN @world",
+            "apk": "sudo apk upgrade",
+            "nix-env": "nix-env -u",
+        }
 
-    def on_selection_changed(self, selection, position, n_items):
-        item = selection.get_selected_item()
-        if item: self.selected_pid = item.pid
+        update_cmd = None
+        for binary, cmd in package_managers.items():
+            if subprocess.run(
+                f"command -v {binary}",
+                shell=True,
+                capture_output=True
+            ).returncode == 0:
+                update_cmd = cmd
+                break
 
-    def on_kill_clicked(self, btn):
-        item = self.selection.get_selected_item()
-        if item:
-            try: os.kill(item.pid, 9); self.selected_pid = None
-            except: pass
+        if not update_cmd:
+            update_cmd = "echo 'No supported system package manager found!'"
+
+        flatpak_update = self.update_flatpaks()
+
+        full_cmd = (
+            "echo '=== SYSTEM UPDATE ==='; "
+            f"{update_cmd}; "
+            "echo; echo '=== FLATPAK UPDATE ==='; "
+            f"{flatpak_update}; "
+            "echo; echo 'All updates completed.'; "
+            "sleep 5"
+        )
+
+        self.open_terminal(full_cmd)
+
+
+    def get_packages_to_install(self):
+        return [
+            "git",
+            "curl",
+            "wget",
+            "mangohud",
+            "cmake",
+            "make",
+            "mpv",
+            "flatpak",
+            "steam",
+            "python",
+            "python-pip",
+            "gtk4",
+            "gamemode",
+            "gamescope",
+            "ark",
+            "bitwarden",
+            "smartmontools",
+            "fuse",
+            "zen-browser-bin",
+        ]
+
+    def on_install_packages(self, btn):
+        packages = self.get_packages_to_install()
+        if not packages:
+            self.open_terminal("echo 'No packages defined'; sleep 3")
+            return
+
+        pkg_str = " ".join(packages)
+
+        managers = {
+            "pacman": f"sudo pacman -S --needed {pkg_str}",
+            "apt": f"sudo apt update && sudo apt install -y {pkg_str}",
+            "dnf": f"sudo dnf install -y {pkg_str}",
+            "zypper": f"sudo zypper install -y {pkg_str}",
+            "xbps-install": f"sudo xbps-install -S {pkg_str}",
+            "eopkg": f"sudo eopkg install -y {pkg_str}",
+            "apk": f"sudo apk add {pkg_str}",
+            "emerge": f"sudo emerge {pkg_str}",
+            "nix-env": f"nix-env -i {pkg_str}",
+        }
+
+        install_cmd = None
+        for binary, cmd in managers.items():
+            if subprocess.run(
+                f"command -v {binary}",
+                shell=True,
+                capture_output=True
+            ).returncode == 0:
+                install_cmd = cmd
+                break
+
+        if not install_cmd:
+            install_cmd = "echo 'No supported package manager found!'"
+
+        full_cmd = (
+            f"echo 'Installing packages:'; echo '{pkg_str}'; echo; "
+            f"{install_cmd}; "
+            f"echo; echo 'Done.'; sleep 5"
+        )
+
+        self.open_terminal(full_cmd)
+
+    def get_flatpaks_to_install(self):
+        return [
+            "com.dec05eba.gpu_screen_recorder",
+            "com.github.taiko2k.tauonmb",
+            "com.github.xournalpp.xournalpp",
+            "com.vysp3r.ProtonPlus",
+            "io.github.Faugus.faugus-launcher",
+            "io.github.peazip.PeaZip",
+            "io.github.ilya_zlobintsev.LACT",
+            "net.nokyan.Resources",
+            "org.equicord.equibop",
+        ]
+
+    def install_flatpaks(self):
+        flatpaks = self.get_flatpaks_to_install()
+        if not flatpaks:
+            return "echo 'No Flatpaks defined'; sleep 3"
+
+        flatpak_list = " ".join(flatpaks)
+
+        script = (
+            "#!/bin/bash\n"
+            "command -v flatpak >/dev/null 2>&1 || {\n"
+            "  echo \"Flatpak not installed!\";\n"
+            "  sleep 5;\n"
+            "  exit 1;\n"
+            "}\n"
+            "\n"
+            "MISSING=\"\"\n"
+            "\n"
+            f"set -- {flatpak_list}\n"
+            "\n"
+            "for fp in \"$@\"; do\n"
+            "  if ! flatpak info \"$fp\" >/dev/null 2>&1; then\n"
+            "    MISSING=\"$MISSING $fp\"\n"
+            "  fi\n"
+            "done\n"
+            "\n"
+            "if [ -z \"$MISSING\" ]; then\n"
+            "  echo \"All Flatpaks are already installed.\"\n"
+            "  echo \"Closing in 5 seconds...\"\n"
+            "  sleep 5\n"
+            "  exit 0\n"
+            "fi\n"
+            "\n"
+            "echo \"Installing missing Flatpaks:\"\n"
+            "echo \"$MISSING\"\n"
+            "echo\n"
+            "\n"
+            "if flatpak install -y flathub $MISSING; then\n"
+            "  echo\n"
+            "  echo \"SUCCESSFUL\"\n"
+            "else\n"
+            "  echo\n"
+            "  echo \"ERROR during installation\"\n"
+            "fi\n"
+            "\n"
+            "echo \"Closing in 5 seconds...\"\n"
+            "sleep 5\n"
+        )
+
+        return script
+
+
+
+    def update_flatpaks(self):
+        return (
+            "command -v flatpak >/dev/null || "
+            "(echo 'Flatpak not installed!' && sleep 5 && exit); "
+            "flatpak update -y"
+        )
+
 
 if __name__ == "__main__":
     app = LinuxUtilityApp()

@@ -19,7 +19,7 @@ from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk
 class LinuxUtilityApp(Adw.Application):
     
     def __init__(self):
-        super().__init__(application_id='com.example.LinuxUtility',
+        super().__init__(application_id='Control Panel',
                          flags=Gio.ApplicationFlags.FLAGS_NONE)
         self.cpu_history = [0] * 50
         self.mem_history = [0] * 50

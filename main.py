@@ -378,9 +378,14 @@ class LinuxUtilityApp(Adw.Application):
         
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            os.makedirs(backup_dir, exist_ok=True)
-            
-            if os.path.exists(target):
+            if filename != "MangoHud.conf":
+                os.makedirs(backup_dir, exist_ok=True)
+
+            if not os.path.exists(target):
+                open(target, "a").close()
+                print(f"[INFO] Created missing config file: {target}")
+
+            if os.path.exists(target) and filename != "MangoHud.conf":
                 backup_file = os.path.join(backup_dir, os.path.basename(target))
                 
                 backup_file = backup_file.replace(".pivot", "").replace(".enabled", "")
@@ -395,14 +400,14 @@ class LinuxUtilityApp(Adw.Application):
             shutil.copy2(source, target)
             print(f"[INFO] Copied {source} -> {target}")
             
-            subprocess.run(["hyprctl", "reload"], check=False)
-            print("[INFO] Hyprland reloaded")
+            if filename != "MangoHud.conf":
+                subprocess.run(["hyprctl", "reload"], check=False)
+                print("[INFO] Hyprland reloaded")
             
         except Exception as e:
             print(f"[ERROR] Failed to toggle config: {e}")
         
         return False
-
 
     def on_system_update(self, btn):
         package_managers = {
@@ -573,8 +578,6 @@ class LinuxUtilityApp(Adw.Application):
         )
 
         return script
-
-
 
     def update_flatpaks(self):
         return (

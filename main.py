@@ -127,6 +127,16 @@ class LinuxUtilityApp(Adw.Application):
         flatpak_row.add_suffix(flatpak_btn)
         list_box.append(flatpak_row)
 
+        # CUPS Row
+        cups_row = Adw.ActionRow(
+            title="Install CUPS",
+            subtitle="Install printer system and Printer drivers"
+        )
+        cups_btn = Gtk.Button(icon_name="printer-symbolic", valign=Gtk.Align.CENTER)
+        cups_btn.connect("clicked", lambda x: self.install_cups_and_canon())
+        cups_row.add_suffix(cups_btn)
+        list_box.append(cups_row)
+
         # Ping Row
         ping_row = Adw.ActionRow(title="Network Latency Test", subtitle="Ping Google DNS (8.8.8.8)")
         ping_btn = Gtk.Button(label="Run Ping", valign=Gtk.Align.CENTER)
@@ -455,6 +465,8 @@ class LinuxUtilityApp(Adw.Application):
             "smartmontools",
             "fuse",
             "zen-browser-bin",
+            "lutris",
+            "heroic-games-launcher-bin",
         ]
 
     def on_install_packages(self, btn):
@@ -571,6 +583,61 @@ class LinuxUtilityApp(Adw.Application):
             "flatpak update -y"
         )
 
+    def install_cups_and_canon(self):
+        import shutil
+        import time
+
+        required = ["cups", "gutenprint"]
+
+        package_cmds = {
+            "apt": "sudo apt update && sudo apt install -y {}",
+            "pacman": "sudo pacman -S --needed {}",
+            "dnf": "sudo dnf install -y {}",
+            "zypper": "sudo zypper install -y {}",
+            "xbps-install": "sudo xbps-install -S {}",
+            "apk": "sudo apk add {}",
+            "emerge": "sudo emerge {}",
+            "nix-env": "nix-env -iA nixpkgs.{}"
+        }
+
+        pkg_manager = None
+        for mgr in package_cmds.keys():
+            if shutil.which(mgr):
+                pkg_manager = mgr
+                break
+
+        if not pkg_manager:
+            self.open_terminal("echo 'No supported package manager found!' && sleep 5")
+            return
+
+        missing = []
+        for pkg in required:
+            if pkg_manager in ["apt", "dnf", "zypper", "apk"]:
+                check_cmd = f"dpkg -s {pkg}" if pkg_manager == "apt" else f"rpm -q {pkg}"
+            elif pkg_manager == "pacman":
+                check_cmd = f"pacman -Qi {pkg}"
+            elif pkg_manager == "xbps-install":
+                check_cmd = f"xbps-query -Rs {pkg}"
+            elif pkg_manager == "emerge":
+                check_cmd = f"equery list {pkg}"
+            elif pkg_manager == "nix-env":
+                check_cmd = f"nix-env -q {pkg}"
+            else:
+                check_cmd = ""
+
+            if check_cmd:
+                result = subprocess.run(check_cmd, shell=True, capture_output=True)
+                if result.returncode != 0:
+                    missing.append(pkg)
+
+        if not missing:
+            self.open_terminal("echo 'CUPS and Canon drivers are already installed!' && sleep 5")
+            return
+
+        pkg_str = " ".join(missing)
+        install_cmd = package_cmds[pkg_manager].format(pkg_str)
+        full_cmd = f"echo 'Installing missing packages: {pkg_str}'; {install_cmd}; echo 'Done.'; sleep 5"
+        self.open_terminal(full_cmd)
 
 if __name__ == "__main__":
     app = LinuxUtilityApp()

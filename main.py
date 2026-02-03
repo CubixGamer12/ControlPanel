@@ -46,7 +46,15 @@ class LinuxUtilityApp(Adw.Application):
         # TAB 1: TOOLS
         self.view_stack.add_titled_with_icon(self.create_tools_page(), "tools", "Tools", "emblem-system-symbolic")
 
-        # TAB 2: DIAGNOSTICS
+        # TAB 2: UTILITIES
+        self.view_stack.add_titled_with_icon(
+            self.create_utilities_page(),
+            "utils",
+            "Utilities",
+            "applications-system-symbolic"
+        )
+
+        # TAB 3: DIAGNOSTICS
         self.view_stack.add_titled_with_icon(self.create_info_page(), "info", "Diagnostics", "dialog-information-symbolic")
 
         view_switcher = Adw.ViewSwitcher(stack=self.view_stack)
@@ -230,6 +238,132 @@ class LinuxUtilityApp(Adw.Application):
         vbox.append(conn_group)
 
         return self.wrap_in_resizable_view(vbox)
+
+    def create_utilities_page(self):
+        list_box = Gtk.ListBox(css_classes=["boxed-list"])
+        list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+
+        # Restart NetworkManager
+        nm_row = Adw.ActionRow(
+            title="Restart Network",
+            subtitle="Restart NetworkManager service"
+        )
+        nm_btn = Gtk.Button(label="Restart", valign=Gtk.Align.CENTER)
+        nm_btn.connect(
+            "clicked",
+            lambda x: self.open_terminal(
+                "sudo systemctl restart NetworkManager && echo 'Done' && sleep 3"
+            )
+        )
+        nm_row.add_suffix(nm_btn)
+        list_box.append(nm_row)
+
+        # Restart Audio (PipeWire)
+        audio_row = Adw.ActionRow(
+            title="Restart Audio",
+            subtitle="Restart PipeWire / WirePlumber"
+        )
+        audio_btn = Gtk.Button(label="Restart", valign=Gtk.Align.CENTER)
+        audio_btn.connect(
+            "clicked",
+            lambda x: self.open_terminal(
+                "systemctl --user restart pipewire pipewire-pulse wireplumber && echo 'Done' && sleep 3"
+            )
+        )
+        audio_row.add_suffix(audio_btn)
+        list_box.append(audio_row)
+
+        # Clear cache
+        cache_row = Adw.ActionRow(
+            title="Clear Cache",
+            subtitle="Clear user cache (~/.cache)"
+        )
+        cache_btn = Gtk.Button(icon_name="edit-clear-symbolic", valign=Gtk.Align.CENTER)
+        cache_btn.connect(
+            "clicked",
+            lambda x: self.open_terminal(
+                "rm -rf ~/.cache/* && echo 'Cache cleared' && sleep 3"
+            )
+        )
+        cache_row.add_suffix(cache_btn)
+        list_box.append(cache_row)
+
+        # Flatpak repair
+        flatpak_fix_row = Adw.ActionRow(
+            title="Flatpak Repair",
+            subtitle="Fix broken Flatpak installations"
+        )
+        flatpak_fix_btn = Gtk.Button(
+            icon_name="flatpak-symbolic",
+            valign=Gtk.Align.CENTER
+        )
+        flatpak_fix_btn.connect(
+            "clicked",
+            lambda x: self.open_terminal(
+                "flatpak repair -y && echo 'Done' && sleep 5"
+            )
+        )
+        flatpak_fix_row.add_suffix(flatpak_fix_btn)
+        list_box.append(flatpak_fix_row)
+
+        # Open config folder
+        cfg_row = Adw.ActionRow(
+            title="Open Config Folder",
+            subtitle="Open ~/.config in file manager"
+        )
+        cfg_btn = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER)
+        cfg_btn.connect("clicked", lambda x: self.open_config_folder())
+        cfg_row.add_suffix(cfg_btn)
+        list_box.append(cfg_row)
+
+        #GAME PREFIX
+        game_prefix = (
+            "mangohud gamemoderun gamescope "
+            "-W 1920 -H 1080 -r 75 "
+            "--force-grab-cursor -f -- %command%"
+        )
+
+        prefix_row = Adw.ActionRow(
+            title="Game Prefix",
+            subtitle=game_prefix
+        )
+
+        prefix_row.set_subtitle_selectable(True)
+
+        copy_btn = Gtk.Button(
+            icon_name="edit-copy-symbolic",
+            valign=Gtk.Align.CENTER
+        )
+
+        copy_btn.connect(
+            "clicked",
+            lambda x: self.copy_to_clipboard(game_prefix)
+        )
+
+        prefix_row.add_suffix(copy_btn)
+        list_box.append(prefix_row)
+
+
+        # Logout
+        logout_row = Adw.ActionRow(
+            title="Logout",
+            subtitle="End current session"
+        )
+        logout_btn = Gtk.Button(
+            icon_name="system-log-out-symbolic",
+            valign=Gtk.Align.CENTER,
+            css_classes=["destructive-action"]
+        )
+        logout_btn.connect(
+            "clicked",
+            lambda x: self.open_terminal(
+                "loginctl terminate-user $USER"
+            )
+        )
+        logout_row.add_suffix(logout_btn)
+        list_box.append(logout_row)
+
+        return self.wrap_in_resizable_view(list_box)
 
     # --- LOGIC FUNCTIONS ---
 
@@ -641,6 +775,37 @@ class LinuxUtilityApp(Adw.Application):
         install_cmd = package_cmds[pkg_manager].format(pkg_str)
         full_cmd = f"echo 'Installing missing packages: {pkg_str}'; {install_cmd}; echo 'Done.'; sleep 5"
         self.open_terminal(full_cmd)
+
+    def open_config_folder(self):
+        path = os.path.expanduser("~/.config")
+
+        # Prefer file managers
+        file_managers = [
+            ("dolphin", ["dolphin", path]),
+            ("nautilus", ["nautilus", path]),
+            ("gio", ["gio", "open", path]),
+        ]
+
+        for binary, cmd in file_managers:
+            if shutil.which(binary):
+                subprocess.Popen(cmd)
+                return
+
+        # Fallback: terminal + cd
+        terminal = None
+        for t in ["kitty", "alacritty", "foot", "gnome-terminal", "konsole", "xterm"]:
+            if shutil.which(t):
+                terminal = t
+                break
+
+        if terminal == "gnome-terminal":
+            subprocess.Popen(["gnome-terminal", "--", "bash", "-c", f"cd {path}; exec bash"])
+        elif terminal:
+            subprocess.Popen([terminal, "-e", f"bash -c 'cd {path}; exec bash'"])
+
+    def copy_to_clipboard(self, text):
+        clipboard = Gdk.Display.get_default().get_clipboard()
+        clipboard.set(text)
 
 if __name__ == "__main__":
     app = LinuxUtilityApp()

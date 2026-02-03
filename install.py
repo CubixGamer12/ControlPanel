@@ -6,7 +6,7 @@ from pathlib import Path
 
 APP_NAME = "Control Panel"
 DESKTOP_FILENAME = "ControlPanel.desktop"
-ICON_NAME = "preferences-system"
+ICON_NAME = "preferences-system"  # GTK / Adwaita icon (gear)
 
 # Arch Linux system dependencies
 PACMAN_PACKAGES = [

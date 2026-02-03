@@ -634,7 +634,7 @@ class LinuxUtilityApp(Adw.Application):
                     missing.append(pkg)
 
         if not missing:
-            self.open_terminal("echo 'CUPS and Canon drivers are already installed!' && sleep 5")
+            self.open_terminal("echo 'CUPS and Printer drivers are already installed!' && sleep 5")
             return
 
         pkg_str = " ".join(missing)

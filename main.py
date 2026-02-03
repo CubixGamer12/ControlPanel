@@ -34,8 +34,11 @@ class LinuxUtilityApp(Adw.Application):
         win.set_title("Control Panel")
         win.set_default_size(650, 900)
 
+        self.toast_overlay = Adw.ToastOverlay()
+        win.set_content(self.toast_overlay)
+
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        win.set_content(content)
+        self.toast_overlay.set_child(content)
 
         header = Adw.HeaderBar()
         content.append(header)
@@ -44,7 +47,7 @@ class LinuxUtilityApp(Adw.Application):
         self.view_stack.set_vexpand(True)
         
         # TAB 1: TOOLS
-        self.view_stack.add_titled_with_icon(self.create_tools_page(), "tools", "Tools", "emblem-system-symbolic")
+        self.view_stack.add_titled_with_icon(self.create_tools_page(), "tools", "Tools", "preferences-other-symbolic")
 
         # TAB 2: UTILITIES
         self.view_stack.add_titled_with_icon(
@@ -144,6 +147,52 @@ class LinuxUtilityApp(Adw.Application):
         cups_btn.connect("clicked", lambda x: self.install_cups_and_canon())
         cups_row.add_suffix(cups_btn)
         list_box.append(cups_row)
+
+        # ---- BTRFS SNAPSHOTS ----
+        if self.is_btrfs() and self.has_snapper():
+            snapshot_row = Adw.ActionRow(
+                title="Create Btrfs Snapshot",
+                subtitle="Create system snapshot (root)"
+            )
+            snapshot_btn = Gtk.Button.new_from_icon_name("camera-photo-symbolic")
+            snapshot_btn.set_valign(Gtk.Align.CENTER)
+            snapshot_btn.connect(
+                "clicked",
+                lambda x: self.open_terminal(
+                    "sudo snapper -c root create --description 'Manual snapshot from Control Panel'; sleep 3"
+                )
+            )
+            snapshot_row.add_suffix(snapshot_btn)
+            list_box.append(snapshot_row)
+
+            snap_list_row = Adw.ActionRow(
+                title="View Btrfs Snapshots",
+                subtitle="List available system snapshots"
+            )
+            snap_list_btn = Gtk.Button.new_from_icon_name("view-list-symbolic")
+            snap_list_btn.set_valign(Gtk.Align.CENTER)
+            snap_list_btn.connect(
+                "clicked",
+                lambda x: self.open_terminal("sudo snapper list; read")
+            )
+            snap_list_row.add_suffix(snap_list_btn)
+            list_box.append(snap_list_row)
+
+        else:
+            snapshot_row = Adw.ActionRow(
+                title="Create Btrfs Snapshot",
+                subtitle="Btrfs snapshots not supported on this system",
+                sensitive=False
+            )
+            list_box.append(snapshot_row)
+
+            snap_list_row = Adw.ActionRow(
+                title="View Btrfs Snapshots",
+                subtitle="Btrfs snapshots not supported on this system",
+                sensitive=False
+            )
+            list_box.append(snap_list_row)
+
 
         # Ping Row
         ping_row = Adw.ActionRow(title="Network Latency Test", subtitle="Ping Google DNS (8.8.8.8)")
@@ -606,7 +655,13 @@ class LinuxUtilityApp(Adw.Application):
             "zen-browser-bin",
             "lutris",
             "heroic-games-launcher-bin",
+            "snapper",
         ]
+
+        if not self.is_btrfs():
+            packages = [p for p in packages if p != "snapper"]
+
+        return packages
 
     def on_install_packages(self, btn):
         packages = self.get_packages_to_install()
@@ -806,6 +861,20 @@ class LinuxUtilityApp(Adw.Application):
     def copy_to_clipboard(self, text):
         clipboard = Gdk.Display.get_default().get_clipboard()
         clipboard.set(text)
+
+        toast = Adw.Toast(title="Game prefix copied to clipboard")
+        toast.set_timeout(2)
+
+        self.toast_overlay.add_toast(toast)
+
+    def is_btrfs(self):
+        output = subprocess.getoutput("findmnt -n -o FSTYPE /")
+        return "btrfs" in output
+
+    def has_snapper(self):
+        output = subprocess.getoutput("snapper list-configs")
+        return "root" in output
+
 
 if __name__ == "__main__":
     app = LinuxUtilityApp()

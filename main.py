@@ -16,6 +16,37 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk
 
+# ==============================
+# SYSTEM PROFILES CONFIG
+# ==============================
+
+SYSTEM_PROFILES = {
+    "minimal": {
+        "packages": [
+            "git", "curl", "wget", "htop", "nano", "zen-browser-bin", "mpv",
+            "flatpak", "cmake", "make", "python", "python-pip",
+            "ark", "fuse", "snapper", "bitwarden", "smartmontools",
+        ],
+        "services_enable": [],
+        "services_disable": [],
+        "post_cmd": []
+    },
+
+    "gaming": {
+        "packages": [
+            "steam", "mangohud", "gamemode",
+            "gamescope", "lutris", "heroic-games-launcher-bin",
+            "git", "curl", "wget", "htop", "nano", "zen-browser-bin", "mpv",
+            "flatpak", "cmake", "make", "python", "python-pip",
+            "ark", "fuse", "snapper", "bitwarden", "smartmontools",
+        ],
+        "services_enable": ["gamemoded"],
+        "services_disable": [],
+        "post_cmd": []
+    }
+}
+
+
 class LinuxUtilityApp(Adw.Application):
     
     def __init__(self):
@@ -23,6 +54,8 @@ class LinuxUtilityApp(Adw.Application):
                          flags=Gio.ApplicationFlags.FLAGS_NONE)
         self.cpu_history = [0] * 50
         self.mem_history = [0] * 50
+        self.freq_history = [0] * 50
+        self.swap_history = [0] * 50
 
     def get_resource_path(self, relative_path):
         import sys
@@ -83,20 +116,38 @@ class LinuxUtilityApp(Adw.Application):
         return vbox, label, area
 
     def draw_perf_graph(self, area, cr, width, height, color):
-        history = self.cpu_history if color == "blue" else self.mem_history
+        graph_map = {
+            "blue":   (self.cpu_history,  (0.2, 0.5, 0.9)),
+            "green":  (self.mem_history,  (0.1, 0.8, 0.4)),
+            "orange": (self.swap_history, (1.0, 0.5, 0.1)),
+        }
+
+        if color not in graph_map:
+            return
+
+        history, rgb = graph_map[color]
+
         cr.set_source_rgba(0.1, 0.1, 0.1, 0.2)
         cr.rectangle(0, 0, width, height)
         cr.fill()
-        if color == "blue": cr.set_source_rgb(0.2, 0.5, 0.9)
-        else: cr.set_source_rgb(0.1, 0.8, 0.4)
+
+        if len(history) < 2:
+            return
+
+        cr.set_source_rgb(*rgb)
         cr.set_line_width(2)
-        step = width / (len(history) - 1) if len(history) > 1 else 0
+
+        step = width / (len(history) - 1)
         cr.move_to(0, height)
+
         for i, val in enumerate(history):
+            val = max(0, min(val, 100))
             cr.line_to(i * step, height - (val / 100.0 * height))
+
         cr.line_to(width, height)
         cr.fill_preserve()
         cr.stroke()
+        
 
     # --- TOOLS PAGE ---
     def create_tools_page(self):
@@ -147,6 +198,26 @@ class LinuxUtilityApp(Adw.Application):
         cups_btn.connect("clicked", lambda x: self.install_cups_and_canon())
         cups_row.add_suffix(cups_btn)
         list_box.append(cups_row)
+
+        # ---- Profiles Packages ----
+        profile_row = Adw.ActionRow(
+            title="System Profile",
+            subtitle="Apply predefined system configuration"
+        )
+
+        self.profile_combo = Gtk.ComboBoxText()
+        for profile in ["minimal", "gaming"]:
+            self.profile_combo.append_text(profile)
+        self.profile_combo.set_active(0)
+
+        profile_row.add_suffix(self.profile_combo)
+
+        apply_btn = Gtk.Button(icon_name="checkmark-symbolic", css_classes=["suggested-action"])
+        apply_btn.set_valign(Gtk.Align.CENTER)
+        apply_btn.connect("clicked", self.apply_profile)
+        profile_row.add_suffix(apply_btn)
+
+        list_box.append(profile_row)
 
         # ---- BTRFS SNAPSHOTS ----
         if self.is_btrfs() and self.has_snapper():
@@ -227,6 +298,9 @@ class LinuxUtilityApp(Adw.Application):
         cpu_g, self.cpu_label, self.cpu_draw_area = self.create_graph("CPU Graph: ...", "blue")
         mem_g, self.mem_label, self.mem_draw_area = self.create_graph("Memory Graph: ...", "green")
         vbox.append(cpu_g); vbox.append(mem_g)
+
+        swap_g, self.swap_label, self.swap_area = self.create_graph("Swap Usage", "orange")
+        vbox.append(swap_g)
 
         # 1. Software & OS
         vbox.append(self.create_spec_group("Software &amp; OS", [
@@ -447,7 +521,10 @@ class LinuxUtilityApp(Adw.Application):
         mem_val = psutil.virtual_memory().percent
         self.cpu_history.pop(0); self.cpu_history.append(cpu_val)
         self.mem_history.pop(0); self.mem_history.append(mem_val)
-        
+        swap = psutil.swap_memory().percent
+        self.swap_history.pop(0)
+        self.swap_history.append(swap)
+
         if hasattr(self, 'cpu_label'): self.cpu_label.set_text(f"CPU Graph: {cpu_val:.1f}%")
         if hasattr(self, 'mem_label'): self.mem_label.set_text(f"Memory Graph: {mem_val:.1f}%")
         if hasattr(self, 'cpu_draw_area'): self.cpu_draw_area.queue_draw()
@@ -874,6 +951,28 @@ class LinuxUtilityApp(Adw.Application):
     def has_snapper(self):
         output = subprocess.getoutput("snapper list-configs")
         return "root" in output
+
+    def apply_profile(self, btn):
+        profile = self.profile_combo.get_active_text()
+        cfg = SYSTEM_PROFILES[profile]
+
+        pkg_str = " ".join(cfg["packages"])
+
+        cmds = []
+
+        if pkg_str:
+            cmds.append(f"sudo pacman -S --needed {pkg_str}")
+
+        for s in cfg["services_enable"]:
+            cmds.append(f"sudo systemctl enable --now {s}")
+
+        for s in cfg["services_disable"]:
+            cmds.append(f"sudo systemctl disable --now {s}")
+
+        cmds.extend(cfg["post_cmd"])
+
+        full_cmd = " && ".join(cmds) + " ; echo 'Profile applied'; sleep 5"
+        self.open_terminal(full_cmd)
 
 
 if __name__ == "__main__":
